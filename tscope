@@ -6,55 +6,99 @@ var pluralize = require('pluralize');
 var chalk = require('chalk');
 
 var statuses = require('./config/statuses.json'),
-	hashtags = require('./config/hashtags.json'),
+	queries = require('./config/queries.json'),
 	auth = require('./config/auth.json');
 
 program
-	.version('0.0.1')
-	.option('-r --reply', 'Reply to found tweets with a random status [Default: false]')
-	.option('-c --count', 'Number of tweets to search for [Default: 10]')
+	.version('0.0.2')
+	.option('-c, --count <n>', 'specify the number of tweets to search for [default: 10]', parseInt)
+	.option('-q, --query [query]', 'use a custom search query')
+	.option('-r, --reply', 'reply to found tweets')
+	.option('-s, --status [status]', 'use a custom status when replying')
 	.parse(process.argv);
 
-if(hashtags.tagNames.length > 0) {
-	console.log(chalk.green('Searching for ' + hashtags.tagNames.length + ' ' + pluralize('hashtag', hashtags.tagNames.length)));
+// Report actions and possible errors
+console.log('');
+
+if(program.query) {
+	console.log(chalk.green('Searching for tweets using a custom query: ' + program.query));
 }
 else {
-	console.warn(chalk.red('Please include at least 1 hashtag in config/hashtags.json'));
+	if(queries.strings.length > 0) {
+		console.log(chalk.green('Searching for ' + queries.strings.length + ' possible ' + pluralize('query', queries.strings.length)));
+	}
+
+	else {
+		console.warn(chalk.red('Please include at least 1 search query in config/queries.json, or specify one with the `-q` flag.'));
+	}
 }
 
 if(program.reply) {
-	if(statuses.tweets.length > 0) {
-		console.log(chalk.green('Replying with ' + statuses.tweets.length + ' possible ' + pluralize('status', statuses.tweets.length)));
+	if(program.status) console.log(chalk.green('Replying with custom status:' + program.status));
+
+	if(!program.status && statuses.replies.length) {
+		console.log(chalk.green('Replying with ' + statuses.replies.length + ' possible ' + pluralize('status', statuses.replies.length)));
 	}
 	else {
-		console.warn(chalk.red('Please include at least 1 status in config/statuses.json'));
+		console.warn(chalk.red('Please include at least 1 status in config/statuses.json or specify one with the `-s` flag.'));
 	}
 }
 
-if(!program.count || program.count < 0) {
-	program.count = 10;
-}
+// Set default options
+if(!program.count || program.count < 0) program.count = 10;
+if(!program.query) program.query = queries.strings.toString().replace(',', '&');
 
+// Report program.count
+console.log(chalk.blue('Fetching a maximum of ' + program.count + ' ' + pluralize('tweet', program.count) + '. Change this with the `-c` flag.'));
+console.log('');
+
+// Twitter stuff
 var T = new Twit(auth);
 
-var searchTweets = function (q, count) {
+function postTweet(status, replyTo, callback) {
+	T.post('statuses/update', {
+		status: status,
+		in_reply_to_status_id: replyTo
+	}, function(err, data, response) {
+		if(callback) callback(err, data, response);
+	});
+}
+
+function searchTweets(query, count) {
 	T.get('search/tweets', {
-		q: q,
+		q: query,
 		count: count
 	}, function(err, data, response) {
-		if(!err) {
-			var tweets = data.stasuses;
-
-			if(program.reply) {
-				console.log('WIP: Post a random reply from statuses.tweets to userID of this tweet');
-			}
-		}
-		else {
+		if(err) {
 			console.error(err);
-			console.log(chalk.yellow("Make sure you've added the right keys in `config/auth.json`. View `README.md` for more help."))
+			console.log(chalk.yellow("\nMake sure you've added valid keys in `config/auth.json`. View `README.md` for help."))
+		}
+
+		else {
+			var foundTweets = data.statuses;
+
+			foundTweets.map(function(tweet) {
+				console.log('===================');
+				console.log(chalk.yellow(tweet.id_str) + ' | ' + chalk.red('@'+tweet.user.screen_name));
+				console.log(tweet.text);
+
+				if(program.reply) {
+					var reply;
+					(program.status) ? reply = program.status : reply = statuses.replies[Math.floor(Math.random() * statuses.replies.length)];
+					reply = '@' + tweet.user.screen_name + ' ' + reply;
+
+					postTweet(reply, tweet.id_str, function() {
+						if(!err) {
+							console.log(chalk.red('Replied with: ') + chalk.green(reply));
+						}
+						else {
+							console.warn(err);
+						}
+					});
+				}
+			});
 		}
 	});
 }
 
-var hashtagQuery = "#" + hashtags.tagNames.toString().replace(',', '&#');
-return searchTweets(hashtagQuery, program.count);
+return searchTweets(program.query, program.count);
