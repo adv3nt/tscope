@@ -1,4 +1,9 @@
 {
-	"strings": [
-	]
+	"querystrings": [
+	],
+	"compulsory": [
+	],
+	"exclude": [
+	],
+	"mustContainURL": false
 }
